@@ -1,0 +1,10 @@
+
+# Mapi, ki jih generira ESP-IDF
+build/
+managed_components/
+
+# Začasne datoteke sistema in IDE-jev (izbirno)
+.devcontainer/
+.vscode/
+sdkconfig
+.clangd
