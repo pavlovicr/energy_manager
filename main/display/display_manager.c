@@ -279,3 +279,4 @@ void display_clear_screen(void)
     lv_obj_clean(lv_scr_act());
     lv_obj_set_style_bg_color(lv_scr_act(), COLOR_BLACK, LV_PART_MAIN);
 }
+

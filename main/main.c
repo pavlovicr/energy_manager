@@ -33,8 +33,7 @@
 #define EMMA_IP_ADDRESS "192.168.64.101"
 #define MEASUREMENT_INTERVAL_MS 15000
 #define CONTROL_INTERVAL_MS 5000
-#define DISPLAY_UPDATE_INTERVAL_MS 2000  // Display se posodobi pogosteje
-
+#define DISPLAY_UPDATE_INTERVAL_MS 2000  // Display se posodobi 
 // Global variables
 static emma_client_t g_emma;
 static TaskHandle_t measurement_task_handle = NULL;
@@ -408,7 +407,8 @@ void app_main(void) {
     ESP_LOGI(TAG, "Display update interval: %d ms", DISPLAY_UPDATE_INTERVAL_MS);
     
     display_update_system_status("SISTEM AKTIVEN");
-    
+
+   
     // Main loop - reduciran, ker Box3 prikazuje vse informacije
     while (1) {
         // Samo periodicen izpis v konzolo za debug
@@ -421,4 +421,7 @@ void app_main(void) {
         
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
+
+
+    
 }
