@@ -1,11 +1,11 @@
 /*
- * ESP32 Energy Management System
- * Author: ESP32 Developer
+ * ESP32 Energy Management System s Box3 displayom
+ * Author: ESP32 Developer  
  * Date: 2025
  *
  * Description:
- * Smart energy management system that reads data from Huawei EMMA
- * and controls household appliances based on energy availability
+ * Smart energy management sistem ki bere podatke iz Huawei EMMA
+ * in jih prikazuje na Box3 displayu namesto v konzoli
  */
 
 #include <stdio.h>
@@ -21,10 +21,11 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 
-// Custom modules¸
+// Custom moduli
 #include "emma_modbus.h"
 #include "wifi_manager.h"
-#include "load_control.h"
+//#include "load_control.h"
+#include "display_manager.h"  // Dodano za Box3 display
 
 #define TAG "ENERGY_MANAGER"
 
@@ -32,13 +33,15 @@
 #define EMMA_IP_ADDRESS "192.168.64.101"
 #define MEASUREMENT_INTERVAL_MS 15000
 #define CONTROL_INTERVAL_MS 5000
+#define DISPLAY_UPDATE_INTERVAL_MS 2000  // Display se posodobi pogosteje
 
 // Global variables
 static emma_client_t g_emma;
 static TaskHandle_t measurement_task_handle = NULL;
 static TaskHandle_t control_task_handle = NULL;
+static TaskHandle_t display_task_handle = NULL;  // Dodano za display task
 
-// WiFi configuration (move to separate module later)
+// WiFi configuration
 #define WIFI_SSID      "ONEfourTWO"
 #define WIFI_PASSWORD  "markoskacepozelenitrati"
 #define MAXIMUM_RETRY  5
@@ -50,16 +53,16 @@ static int s_retry_num = 0;
 
 // Energy management parameters
 typedef struct {
-    float excess_power_threshold;      // kW - minimum excess power to enable loads
-    float battery_high_soc_threshold;  // % - battery level to start using excess power
-    float battery_low_soc_threshold;   // % - battery level to disable non-essential loads
-    float grid_feed_limit;             // kW - maximum grid feed-in allowed
+    float excess_power_threshold;
+    float battery_high_soc_threshold;
+    float battery_low_soc_threshold;
+    float grid_feed_limit;
     bool load_control_enabled;
     bool grid_limit_active;
 } energy_config_t;
 
 static energy_config_t g_energy_config = {
-    .excess_power_threshold = 1.0f,    // 1kW excess needed
+    .excess_power_threshold = 1.0f,
     .battery_high_soc_threshold = 90.0f,
     .battery_low_soc_threshold = 20.0f,
     .grid_feed_limit = 8.0f,
@@ -67,7 +70,7 @@ static energy_config_t g_energy_config = {
     .grid_limit_active = true,
 };
 
-// WiFi Event Handler (temporary - move to wifi_manager module)
+// WiFi Event Handler
 static void event_handler(void* arg, esp_event_base_t event_base, 
                          int32_t event_id, void* event_data) {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
@@ -137,7 +140,7 @@ void wifi_init_sta(void) {
     }
 }
 
-// Energy Management Logic
+// Energy Management Logic (ostane enaka)
 typedef enum {
     ENERGY_STATE_NORMAL,
     ENERGY_STATE_EXCESS_AVAILABLE,
@@ -150,13 +153,11 @@ static energy_state_t analyze_energy_situation(const emma_measurements_t *measur
         return ENERGY_STATE_NORMAL;
     }
     
-    // Check battery level first
     if (measurements->soc_percent < g_energy_config.battery_low_soc_threshold) {
         ESP_LOGW(TAG, "Battery low: %.1f%% - reducing loads", measurements->soc_percent);
         return ENERGY_STATE_BATTERY_LOW;
     }
     
-    // Check if we need to limit grid feed-in
     if (g_energy_config.grid_limit_active && 
         measurements->feed_in_power > g_energy_config.grid_feed_limit) {
         ESP_LOGW(TAG, "Grid feed-in too high: %.2f kW - enabling loads", 
@@ -164,7 +165,6 @@ static energy_state_t analyze_energy_situation(const emma_measurements_t *measur
         return ENERGY_STATE_GRID_LIMITING;
     }
     
-    // Check for excess power availability
     float excess_power = measurements->pv_output_power - measurements->load_power;
     bool battery_full_enough = measurements->soc_percent > g_energy_config.battery_high_soc_threshold;
     
@@ -185,76 +185,32 @@ static void execute_energy_control(energy_state_t state, const emma_measurements
     
     switch (state) {
         case ENERGY_STATE_EXCESS_AVAILABLE:
-            ESP_LOGI(TAG, "🔋 Enabling loads due to excess power");
-            // Enable water heater, heat pump, etc.
-            // load_control_enable_flexible_loads();
+            ESP_LOGI(TAG, "Enabling loads due to excess power");
             break;
-            
         case ENERGY_STATE_BATTERY_LOW:
-            ESP_LOGI(TAG, "⚠️  Reducing loads due to low battery");
-            // Disable non-essential loads
-            // load_control_disable_non_essential_loads();
+            ESP_LOGI(TAG, "Reducing loads due to low battery");
             break;
-            
         case ENERGY_STATE_GRID_LIMITING:
-            ESP_LOGI(TAG, "⚡ Enabling loads to reduce grid feed-in");
-            // Enable high-power loads to consume excess
-            // load_control_enable_high_power_loads();
+            ESP_LOGI(TAG, "Enabling loads to reduce grid feed-in");
             break;
-            
         case ENERGY_STATE_NORMAL:
         default:
             ESP_LOGD(TAG, "Normal operation - maintaining current load state");
-            // load_control_maintain_normal_state();
             break;
     }
 }
 
-static void print_energy_summary(const emma_measurements_t *measurements, energy_state_t state) {
-    printf("\n╔══════════════════════════════════════════════════════════════╗\n");
-    printf("║                    ENERGY MANAGEMENT STATUS                  ║\n");
-    printf("╠══════════════════════════════════════════════════════════════╣\n");
-    printf("║ Current State: ");
-    
+static const char* get_energy_state_string(energy_state_t state) {
     switch (state) {
-        case ENERGY_STATE_NORMAL:
-            printf("🔄 NORMAL OPERATION                        ║\n");
-            break;
-        case ENERGY_STATE_EXCESS_AVAILABLE:
-            printf("🔋 EXCESS POWER AVAILABLE                  ║\n");
-            break;
-        case ENERGY_STATE_BATTERY_LOW:
-            printf("⚠️  BATTERY LOW - REDUCING LOADS            ║\n");
-            break;
-        case ENERGY_STATE_GRID_LIMITING:
-            printf("⚡ GRID LIMITING ACTIVE                     ║\n");
-            break;
+        case ENERGY_STATE_NORMAL: return "NORMALNO";
+        case ENERGY_STATE_EXCESS_AVAILABLE: return "PRESEZEK ENERGIJE";
+        case ENERGY_STATE_BATTERY_LOW: return "NIZKA BATERIJA";
+        case ENERGY_STATE_GRID_LIMITING: return "OMEJITEV OMREZJA";
+        default: return "NEZNAN";
     }
-    
-    if (measurements && measurements->data_valid) {
-        printf("╟──────────────────────────────────────────────────────────────╢\n");
-        printf("║ Key Metrics:                                                 ║\n");
-        printf("║   PV Production      : %8.2f kW                         ║\n", measurements->pv_output_power);
-        printf("║   House Consumption  : %8.2f kW                         ║\n", measurements->load_power);
-        printf("║   Battery Power      : %8.2f kW                         ║\n", measurements->battery_charge_discharge_power);
-        printf("║   Grid Feed-in       : %8.2f kW                         ║\n", measurements->feed_in_power);
-        printf("║   Battery SOC        : %8.1f %%                          ║\n", measurements->soc_percent);
-        printf("╟──────────────────────────────────────────────────────────────╢\n");
-        
-        float excess_power = measurements->pv_output_power - measurements->load_power;
-        printf("║   Calculated Excess  : %8.2f kW                         ║\n", excess_power);
-    }
-    
-    printf("║ Configuration:                                               ║\n");
-    printf("║   Load Control       : %s                                ║\n", 
-           g_energy_config.load_control_enabled ? "ENABLED " : "DISABLED");
-    printf("║   Grid Limit         : %8.2f kW                         ║\n", g_energy_config.grid_feed_limit);
-    printf("║   Excess Threshold   : %8.2f kW                         ║\n", g_energy_config.excess_power_threshold);
-    printf("║   Success Rate       : %8.1f %%                          ║\n", emma_get_success_rate(&g_emma));
-    printf("╚══════════════════════════════════════════════════════════════╝\n\n");
 }
 
-// Task for reading EMMA measurements
+// Task za branje EMMA meritev
 static void measurement_task(void *pvParameters) {
     ESP_LOGI(TAG, "Starting measurement task");
     
@@ -262,10 +218,9 @@ static void measurement_task(void *pvParameters) {
         esp_err_t ret = emma_read_all_measurements(&g_emma);
         
         if (ret == ESP_OK) {
-            ESP_LOGI(TAG, "✅ EMMA measurements updated successfully");
+            ESP_LOGI(TAG, "EMMA measurements updated successfully");
         } else {
-            ESP_LOGW(TAG, "❌ Failed to read EMMA measurements");
-            // Try to reconnect
+            ESP_LOGW(TAG, "Failed to read EMMA measurements");
             emma_disconnect(&g_emma);
         }
         
@@ -273,49 +228,77 @@ static void measurement_task(void *pvParameters) {
     }
 }
 
-// Task for energy management control logic
+// Task za energijski management control
 static void control_task(void *pvParameters) {
     ESP_LOGI(TAG, "Starting control task");
     
     energy_state_t current_state = ENERGY_STATE_NORMAL;
-    energy_state_t previous_state = ENERGY_STATE_NORMAL;
     
     while (1) {
-        // Analyze current energy situation
         current_state = analyze_energy_situation(&g_emma.measurements);
-        
-        // Execute control actions if state changed or every few cycles
-        static int control_counter = 0;
-        if (current_state != previous_state || (control_counter % 3 == 0)) {
-            execute_energy_control(current_state, &g_emma.measurements);
-            print_energy_summary(&g_emma.measurements, current_state);
-        }
-        
-        previous_state = current_state;
-        control_counter++;
+        execute_energy_control(current_state, &g_emma.measurements);
         
         vTaskDelay(pdMS_TO_TICKS(CONTROL_INTERVAL_MS));
     }
 }
 
-// Configuration management functions
+// Novi task za posodabljanje Box3 displaya
+static void display_task(void *pvParameters) {
+    ESP_LOGI(TAG, "Starting Box3 display task");
+    
+    energy_state_t last_state = ENERGY_STATE_NORMAL;
+    bool last_emma_connected = false;
+    bool wifi_connected = true;
+    
+    while (1) {
+        // Preveri EMMA povezavo
+        bool emma_connected = g_emma.modbus_client.connected && g_emma.measurements.data_valid;
+        float success_rate = emma_get_success_rate(&g_emma);
+        
+        // Posodobi EMMA meritve na displayu
+        if (emma_connected) {
+            display_update_emma_measurements(&g_emma.measurements);
+        }
+        
+        // Posodobi status povezave (samo ce se je spremenil)
+        if (emma_connected != last_emma_connected || 
+            (int)success_rate % 10 == 0) { // vsakih 10% spremembe
+            display_update_connection_status(emma_connected, wifi_connected, success_rate);
+            last_emma_connected = emma_connected;
+        }
+        
+        // Posodobi sistem status
+        energy_state_t current_state = analyze_energy_situation(&g_emma.measurements);
+        if (current_state != last_state) {
+            display_update_system_status(get_energy_state_string(current_state));
+            last_state = current_state;
+        }
+        
+        // Preveri za napake
+        if (!emma_connected && success_rate < 10.0f) {
+            display_show_error("EMMA CONNECTION LOST");
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(DISPLAY_UPDATE_INTERVAL_MS));
+    }
+}
+
+// Configuration management functions (ostane enako)
 void energy_config_print(void) {
-    printf("\n╔══════════════════════════════════════════════════════════════╗\n");
-    printf("║                    ENERGY MANAGER CONFIG                    ║\n");
-    printf("╠══════════════════════════════════════════════════════════════╣\n");
-    printf("║ Load Control Enabled     : %s                           ║\n", 
+    printf("\n=== ENERGY MANAGER CONFIG ===\n");
+    printf("Load Control Enabled     : %s\n", 
            g_energy_config.load_control_enabled ? "YES" : "NO");
-    printf("║ Grid Limit Active        : %s                           ║\n", 
+    printf("Grid Limit Active        : %s\n", 
            g_energy_config.grid_limit_active ? "YES" : "NO");
-    printf("║ Excess Power Threshold   : %8.2f kW                     ║\n", 
+    printf("Excess Power Threshold   : %.2f kW\n", 
            g_energy_config.excess_power_threshold);
-    printf("║ Battery High SOC         : %8.1f %%                      ║\n", 
+    printf("Battery High SOC         : %.1f%%\n", 
            g_energy_config.battery_high_soc_threshold);
-    printf("║ Battery Low SOC          : %8.1f %%                      ║\n", 
+    printf("Battery Low SOC          : %.1f%%\n", 
            g_energy_config.battery_low_soc_threshold);
-    printf("║ Grid Feed Limit          : %8.2f kW                     ║\n", 
+    printf("Grid Feed Limit          : %.2f kW\n", 
            g_energy_config.grid_feed_limit);
-    printf("╚══════════════════════════════════════════════════════════════╝\n\n");
+    printf("===============================\n\n");
 }
 
 void energy_config_set_load_control(bool enabled) {
@@ -323,95 +306,31 @@ void energy_config_set_load_control(bool enabled) {
     ESP_LOGI(TAG, "Load control %s", enabled ? "ENABLED" : "DISABLED");
 }
 
-void energy_config_set_thresholds(float excess_kw, float high_soc, float low_soc) {
-    g_energy_config.excess_power_threshold = excess_kw;
-    g_energy_config.battery_high_soc_threshold = high_soc;
-    g_energy_config.battery_low_soc_threshold = low_soc;
-    ESP_LOGI(TAG, "Thresholds updated: Excess=%.2fkW, High SOC=%.1f%%, Low SOC=%.1f%%", 
-             excess_kw, high_soc, low_soc);
-}
-
-void energy_config_set_grid_limit(float limit_kw, bool active) {
-    g_energy_config.grid_feed_limit = limit_kw;
-    g_energy_config.grid_limit_active = active;
-    ESP_LOGI(TAG, "Grid limit: %.2f kW (%s)", limit_kw, active ? "ACTIVE" : "INACTIVE");
-}
-
-// EMMA control wrapper functions
-esp_err_t emma_control_set_mode(emma_ess_control_mode_t mode) {
-    ESP_LOGI(TAG, "Setting EMMA ESS mode to: %s", emma_get_ess_mode_string(mode));
-    return emma_set_ess_control_mode(&g_emma, mode);
-}
-
-esp_err_t emma_control_limit_grid_power(float limit_kw) {
-    ESP_LOGI(TAG, "Setting EMMA grid feed-in limit to: %.2f kW", limit_kw);
-    esp_err_t ret;
-    
-    // First set the power control mode to limited feed-in
-    ret = emma_set_power_control_mode(&g_emma, EMMA_POWER_MODE_LIMITED_FEED_IN_KW);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-    
-    // Then set the limit value
-    ret = emma_set_max_grid_feed_in_power(&g_emma, limit_kw);
-    return ret;
-}
-
-esp_err_t emma_control_unlimited_grid(void) {
-    ESP_LOGI(TAG, "Setting EMMA to unlimited grid feed-in");
-    return emma_set_power_control_mode(&g_emma, EMMA_POWER_MODE_UNLIMITED);
-}
-
 // System status and diagnostics
 void system_print_status(void) {
-    printf("\n╔══════════════════════════════════════════════════════════════╗\n");
-    printf("║                      SYSTEM STATUS                          ║\n");
-    printf("╠══════════════════════════════════════════════════════════════╣\n");
-    printf("║ EMMA Connection          : %s                           ║\n", 
+    printf("\n=== SYSTEM STATUS ===\n");
+    printf("EMMA Connection          : %s\n", 
            g_emma.modbus_client.connected ? "CONNECTED" : "DISCONNECTED");
-    printf("║ EMMA IP Address          : %s                    ║\n", 
+    printf("EMMA IP Address          : %s\n", 
            g_emma.modbus_client.ip_address);
-    printf("║ Communication Success    : %8.1f %%                      ║\n", 
+    printf("Communication Success    : %.1f%%\n", 
            emma_get_success_rate(&g_emma));
-    printf("║ Read Errors              : %8d                          ║\n", 
+    printf("Read Errors              : %d\n", 
            (unsigned int)g_emma.read_errors);
-    printf("║ Read Success             : %8d                          ║\n", 
+    printf("Read Success             : %d\n", 
            (unsigned int)g_emma.read_success);
-    printf("║ Last Update              : %llu us ago                  ║\n", 
-           esp_timer_get_time() - g_emma.measurements.timestamp_us);
-    printf("║ Data Valid               : %s                           ║\n", 
+    printf("Data Valid               : %s\n", 
            g_emma.measurements.data_valid ? "YES" : "NO");
-    printf("║ Free Heap                : %d bytes                     ║\n", 
+    printf("Free Heap                : %d bytes\n", 
            (unsigned int)esp_get_free_heap_size());
-    printf("║ Tasks Running            : %d                              ║\n", 
+    printf("Tasks Running            : %d\n", 
            uxTaskGetNumberOfTasks());
-    printf("╚══════════════════════════════════════════════════════════════╝\n\n");
-}
-
-// Console command handler (for future CLI expansion)
-void handle_console_command(const char* command) {
-    if (strcmp(command, "status") == 0) {
-        system_print_status();
-    } else if (strcmp(command, "config") == 0) {
-        energy_config_print();
-    } else if (strcmp(command, "measurements") == 0) {
-        emma_print_measurements(&g_emma.measurements);
-    } else if (strcmp(command, "enable_loads") == 0) {
-        energy_config_set_load_control(true);
-    } else if (strcmp(command, "disable_loads") == 0) {
-        energy_config_set_load_control(false);
-    } else if (strcmp(command, "reset_stats") == 0) {
-        emma_reset_statistics(&g_emma);
-        ESP_LOGI(TAG, "Statistics reset");
-    } else {
-        ESP_LOGW(TAG, "Unknown command: %s", command);
-    }
+    printf("====================\n\n");
 }
 
 // Main application entry point
 void app_main(void) {
-    ESP_LOGI(TAG, "🏡 Starting ESP32 Energy Management System");
+    ESP_LOGI(TAG, "Starting ESP32 Energy Management System with Box3 Display");
     ESP_LOGI(TAG, "Target EMMA: %s", EMMA_IP_ADDRESS);
     
     // Initialize NVS
@@ -422,26 +341,40 @@ void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
     
+    // Initialize Box3 Display NAJPREJ
+    ESP_LOGI(TAG, "Initializing Box3 Display...");
+    display_init();
+    display_create_emma_screen();
+    display_update_system_status("INICIALIZACIJA");
+    
     // Initialize WiFi
+    ESP_LOGI(TAG, "Initializing WiFi...");
     wifi_init_sta();
+    display_update_connection_status(false, true, 0.0f);
     vTaskDelay(pdMS_TO_TICKS(3000));
     
     // Initialize EMMA client
+    ESP_LOGI(TAG, "Initializing EMMA client...");
     ret = emma_init(&g_emma, EMMA_IP_ADDRESS);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize EMMA client");
+        display_show_error("EMMA INIT FAILED");
         return;
     }
     
     // Connect to EMMA
     ret = emma_connect(&g_emma);
     if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "✅ Connected to EMMA successfully");
+        ESP_LOGI(TAG, "Connected to EMMA successfully");
+        display_update_connection_status(true, true, 100.0f);
+        display_update_system_status("POVEZANO");
     } else {
-        ESP_LOGW(TAG, "⚠️  Initial EMMA connection failed - will retry in measurement task");
+        ESP_LOGW(TAG, "Initial EMMA connection failed - will retry in measurement task");
+        display_update_connection_status(false, true, 0.0f);
+        display_update_system_status("CONNECTING");
     }
     
-    // Print initial configuration
+    // Print initial configuration (samo v konzolo)
     energy_config_print();
     system_print_status();
     
@@ -449,6 +382,7 @@ void app_main(void) {
     xTaskCreate(measurement_task, "measurement_task", 4096, NULL, 5, &measurement_task_handle);
     if (measurement_task_handle == NULL) {
         ESP_LOGE(TAG, "Failed to create measurement task");
+        display_show_error("TASK CREATE FAILED");
         return;
     }
     
@@ -456,20 +390,32 @@ void app_main(void) {
     xTaskCreate(control_task, "control_task", 4096, NULL, 4, &control_task_handle);
     if (control_task_handle == NULL) {
         ESP_LOGE(TAG, "Failed to create control task");
+        display_show_error("CONTROL TASK FAILED");
         return;
     }
     
-    ESP_LOGI(TAG, "🚀 Energy Management System started successfully");
-    ESP_LOGI(TAG, "📊 Measurement interval: %d ms", MEASUREMENT_INTERVAL_MS);
-    ESP_LOGI(TAG, "⚡ Control interval: %d ms", CONTROL_INTERVAL_MS);
+    // Create display task
+    xTaskCreate(display_task, "display_task", 4096, NULL, 3, &display_task_handle);
+    if (display_task_handle == NULL) {
+        ESP_LOGE(TAG, "Failed to create display task");
+        display_show_error("DISPLAY TASK FAILED");
+        return;
+    }
     
-    // Main loop - could be used for console commands or web interface
+    ESP_LOGI(TAG, "Energy Management System with Box3 started successfully");
+    ESP_LOGI(TAG, "Measurement interval: %d ms", MEASUREMENT_INTERVAL_MS);
+    ESP_LOGI(TAG, "Control interval: %d ms", CONTROL_INTERVAL_MS);
+    ESP_LOGI(TAG, "Display update interval: %d ms", DISPLAY_UPDATE_INTERVAL_MS);
+    
+    display_update_system_status("SISTEM AKTIVEN");
+    
+    // Main loop - reduciran, ker Box3 prikazuje vse informacije
     while (1) {
-        // Every 60 seconds, print a status summary
+        // Samo periodicen izpis v konzolo za debug
         static int status_counter = 0;
-        if (status_counter % (60000 / 1000) == 0) {
+        if (status_counter % 120 == 0) { // vsakih 2 minuti
             system_print_status();
-            energy_config_print();
+            ESP_LOGI(TAG, "System running normally, check Box3 display for details");
         }
         status_counter++;
         

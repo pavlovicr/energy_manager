@@ -1,20 +1,20 @@
-# main/CMakeLists.txt - Energy Manager main komponenta
-# Ta datoteka mora biti v main/ direktoriju
+# main/CMakeLists.txt - Energy Manager s Box3 displayom
 
-# Začnemo z osnovnimi datotekami, ki jih imate
-# Dodajte nove datoteke ko jih ustvarite
+# main/CMakeLists.txt - Energy Manager s Box3 displayom
 
 idf_component_register(
     SRCS 
         "main.c"
-         "modbus/modbus_tcp.c"      # Dodajte ko ustvarite
-         "modbus/emma_modbus.c"     
-         "utils/wifi_manager.c"     
-        # "utils/load_control.c"     # Dodajte ko ustvarite
+        "modbus/modbus_tcp.c"      
+        "modbus/emma_modbus.c"     
+        "utils/wifi_manager.c"     
+        "utils/load_control.c"     
+        "display/display_manager.c"    # Dodano za Box3 display
     INCLUDE_DIRS 
         "."
-         "modbus"                   
-         "utils"                    
+        "modbus"                   
+        "utils"                    
+        "display"                  # Dodano za Box3 display
     REQUIRES 
         nvs_flash
         esp_wifi
@@ -27,4 +27,6 @@ idf_component_register(
         driver
         esp_system
         esp_common
+        espressif__esp-box-3       # Pravilno ime iz managed_components
+        espressif__esp_lvgl_port   # LVGL port
 )
