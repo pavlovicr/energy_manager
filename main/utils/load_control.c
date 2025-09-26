@@ -179,16 +179,36 @@ esp_err_t wifi_manager_load_config(void) {
     ESP_LOGI(TAG, "WiFi config loaded");
     return ESP_OK;
 }
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//void wifi_manager_print_status(void) {
+//    wifi_info_t info = wifi_manager_get_info();
+    
+//    printf("\n╔══════════════════════════════════════════════════════════════╗\n");
+//    printf("║                       WIFI STATUS                           ║\n");
+//    printf("╠══════════════════════════════════════════════════════════════╣\n");
+//    printf("║ SSID                 : %-32s ║\n", info.ssid);
+//    printf("║ Status               : %-32s ║\n", wifi_manager_get_status_string(info.status));
+//    printf("║ IP Address           : " IPSTR "                        ║\n", IP2STR(&info.ip_address));
+//    printf("║ RSSI                 : %d dBm                            ║\n", info.rssi);
+//    printf("║ Retry Count          : %u                                ║\n", (unsigned int)info.retry_count);
+//    printf("║ Disconnect Count     : %u                                ║\n", (unsigned int)info.disconnect_count);
+//    printf("║ Connect Time         : %u s                              ║\n", (unsigned int)info.connect_time);
+//    printf("╚══════════════════════════════════════════════════════════════╝\n\n");
+//}
 
 void wifi_manager_print_status(void) {
     wifi_info_t info = wifi_manager_get_info();
+    
+    // Pretvori uint32_t IP naslov v esp_ip4_addr_t strukturo za IP2STR makro
+    esp_ip4_addr_t ip_addr;
+    ip_addr.addr = info.ip_address;
     
     printf("\n╔══════════════════════════════════════════════════════════════╗\n");
     printf("║                       WIFI STATUS                           ║\n");
     printf("╠══════════════════════════════════════════════════════════════╣\n");
     printf("║ SSID                 : %-32s ║\n", info.ssid);
     printf("║ Status               : %-32s ║\n", wifi_manager_get_status_string(info.status));
-    printf("║ IP Address           : " IPSTR "                        ║\n", IP2STR(&info.ip_address));
+    printf("║ IP Address           : " IPSTR "                        ║\n", IP2STR(&ip_addr));
     printf("║ RSSI                 : %d dBm                            ║\n", info.rssi);
     printf("║ Retry Count          : %u                                ║\n", (unsigned int)info.retry_count);
     printf("║ Disconnect Count     : %u                                ║\n", (unsigned int)info.disconnect_count);
@@ -196,6 +216,7 @@ void wifi_manager_print_status(void) {
     printf("╚══════════════════════════════════════════════════════════════╝\n\n");
 }
 
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 const char* wifi_manager_get_status_string(wifi_status_t status) {
     switch (status) {
         case WIFI_STATUS_DISCONNECTED: return "DISCONNECTED";

@@ -24,7 +24,7 @@
 // Custom moduli
 #include "emma_modbus.h"
 #include "wifi_manager.h"
-//#include "load_control.h"
+#include "load_control.h"
 #include "display_manager.h"  // Dodano za Box3 display
 
 #define TAG "ENERGY_MANAGER"
