@@ -33,9 +33,10 @@
 #define EMMA_IP_ADDRESS "192.168.64.101"
 #define MEASUREMENT_INTERVAL_MS 15000
 #define CONTROL_INTERVAL_MS 5000
-#define DISPLAY_UPDATE_INTERVAL_MS 2000  // Display se posodobi 
+#define DISPLAY_UPDATE_INTERVAL_MS 3000  // Display se posodobi 
+
 // Global variables
-static emma_client_t g_emma;
+static emma_client_t g_emma; //struct emma_modbus.h
 static TaskHandle_t measurement_task_handle = NULL;
 static TaskHandle_t control_task_handle = NULL;
 static TaskHandle_t display_task_handle = NULL;  // Dodano za display task
@@ -45,30 +46,30 @@ static TaskHandle_t display_task_handle = NULL;  // Dodano za display task
 #define WIFI_PASSWORD  "markoskacepozelenitrati"
 #define MAXIMUM_RETRY  5
 
-static EventGroupHandle_t s_wifi_event_group;
+static EventGroupHandle_t s_wifi_event_group;//za spremljanje stanja povezave
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 static int s_retry_num = 0;
-
+///////////////////////////////////////////////energetski management - tu so nastavljene vrednosti(pragovi) za vklop in izklop////////////////////
 // Energy management parameters
 typedef struct {
-    float excess_power_threshold;
-    float battery_high_soc_threshold;
-    float battery_low_soc_threshold;
-    float grid_feed_limit;
+    float excess_power_threshold_prag_moci;
+    float battery_high_soc_threshold_zgornji_prag_napolnjenosti_baterije;
+    float battery_low_soc_threshold_spodnji_prag_napolnjenosti_baterije;
+    float grid_feed_limit_meja_za_prodajo;
     bool load_control_enabled;
     bool grid_limit_active;
 } energy_config_t;
 
 static energy_config_t g_energy_config = {
-    .excess_power_threshold = 1.0f,
-    .battery_high_soc_threshold = 90.0f,
-    .battery_low_soc_threshold = 20.0f,
-    .grid_feed_limit = 8.0f,
+    .excess_power_threshold_prag_moci = 1.0f,
+    .battery_high_soc_threshold_zgornji_prag_napolnjenosti_baterije = 90.0f,
+    .battery_low_soc_threshold_spodnji_prag_napolnjenosti_baterije = 20.0f,
+    .grid_feed_limit_meja_za_prodajo = 8.0f,
     .load_control_enabled = true,
     .grid_limit_active = true,
 };
-
+//777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777
 // WiFi Event Handler
 static void event_handler(void* arg, esp_event_base_t event_base, 
                          int32_t event_id, void* event_data) {
@@ -152,22 +153,22 @@ static energy_state_t analyze_energy_situation(const emma_measurements_t *measur
         return ENERGY_STATE_NORMAL;
     }
     
-    if (measurements->soc_percent < g_energy_config.battery_low_soc_threshold) {
+    if (measurements->soc_percent < g_energy_config.battery_low_soc_threshold_spodnji_prag_napolnjenosti_baterije) {
         ESP_LOGW(TAG, "Battery low: %.1f%% - reducing loads", measurements->soc_percent);
         return ENERGY_STATE_BATTERY_LOW;
     }
     
     if (g_energy_config.grid_limit_active && 
-        measurements->feed_in_power > g_energy_config.grid_feed_limit) {
+        measurements->feed_in_power > g_energy_config.grid_feed_limit_meja_za_prodajo) {
         ESP_LOGW(TAG, "Grid feed-in too high: %.2f kW - enabling loads", 
                  measurements->feed_in_power);
         return ENERGY_STATE_GRID_LIMITING;
     }
     
     float excess_power = measurements->pv_output_power - measurements->load_power;
-    bool battery_full_enough = measurements->soc_percent > g_energy_config.battery_high_soc_threshold;
+    bool battery_full_enough = measurements->soc_percent > g_energy_config.battery_high_soc_threshold_zgornji_prag_napolnjenosti_baterije;
     
-    if (excess_power > g_energy_config.excess_power_threshold && battery_full_enough) {
+    if (excess_power > g_energy_config.excess_power_threshold_prag_moci && battery_full_enough) {
         ESP_LOGI(TAG, "Excess power available: %.2f kW, Battery: %.1f%%", 
                  excess_power, measurements->soc_percent);
         return ENERGY_STATE_EXCESS_AVAILABLE;
@@ -290,13 +291,13 @@ void energy_config_print(void) {
     printf("Grid Limit Active        : %s\n", 
            g_energy_config.grid_limit_active ? "YES" : "NO");
     printf("Excess Power Threshold   : %.2f kW\n", 
-           g_energy_config.excess_power_threshold);
+           g_energy_config.excess_power_threshold_prag_moci);
     printf("Battery High SOC         : %.1f%%\n", 
-           g_energy_config.battery_high_soc_threshold);
+           g_energy_config.battery_high_soc_threshold_zgornji_prag_napolnjenosti_baterije);
     printf("Battery Low SOC          : %.1f%%\n", 
-           g_energy_config.battery_low_soc_threshold);
+           g_energy_config.battery_low_soc_threshold_spodnji_prag_napolnjenosti_baterije);
     printf("Grid Feed Limit          : %.2f kW\n", 
-           g_energy_config.grid_feed_limit);
+           g_energy_config.grid_feed_limit_meja_za_prodajo);
     printf("===============================\n\n");
 }
 
@@ -331,7 +332,7 @@ void system_print_status(void) {
 void app_main(void) {
     ESP_LOGI(TAG, "Starting ESP32 Energy Management System with Box3 Display");
     ESP_LOGI(TAG, "Target EMMA: %s", EMMA_IP_ADDRESS);
-    
+   
     // Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
