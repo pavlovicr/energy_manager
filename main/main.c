@@ -50,8 +50,8 @@ static EventGroupHandle_t s_wifi_event_group;//za spremljanje stanja povezave
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 static int s_retry_num = 0;
-///////////////////////////////////////////////energetski management - tu so nastavljene vrednosti(pragovi) za vklop in izklop////////////////////
-// Energy management parameters
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Energy management parameters - Pragovi za odločanje, kdaj vklopiti/izklopiti obremenitve
 typedef struct {
     float excess_power_threshold_prag_moci;
     float battery_high_soc_threshold_zgornji_prag_napolnjenosti_baterije;
@@ -70,8 +70,14 @@ static energy_config_t g_energy_config = {
     .grid_limit_active = true,
 };
 //777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777
-// WiFi Event Handler
-static void event_handler(void* arg, esp_event_base_t event_base, 
+
+/* WiFi Event Handler - 
+funkcija, ki se kliče ob wifi dogodkih : 
+    - Ob zagonu WiFi-ja začne povezovati
+    - Ob prekinitvi povezave poskuša ponovno povezovati
+    - Ko dobi IP naslov, zabeleži uspešno povezavo */
+
+    static void event_handler(void* arg, esp_event_base_t event_base, 
                          int32_t event_id, void* event_data) {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
@@ -85,12 +91,12 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip)); //MAKRO #define IPSTR "%d.%d.%d.%d" ,    ip_info.ip je instanca structa, ki vsebuje IP, mask in gateway
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
-
+//inicializacija wifi
 void wifi_init_sta(void) {
     s_wifi_event_group = xEventGroupCreate();
 
@@ -139,11 +145,11 @@ void wifi_init_sta(void) {
         ESP_LOGE(TAG, "Failed to connect WiFi");
     }
 }
-
-// Energy Management Logic (ostane enaka)
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Energy Management Logic - Logika energy managementa
 typedef enum {
     ENERGY_STATE_NORMAL,
-    ENERGY_STATE_EXCESS_AVAILABLE,
+    ENERGY_STATE_EXCESS_AVAILABLE_NA_VOLJO_PRESEZEK_ENERGIJE,
     ENERGY_STATE_BATTERY_LOW,
     ENERGY_STATE_GRID_LIMITING,
 } energy_state_t;
@@ -171,7 +177,7 @@ static energy_state_t analyze_energy_situation(const emma_measurements_t *measur
     if (excess_power > g_energy_config.excess_power_threshold_prag_moci && battery_full_enough) {
         ESP_LOGI(TAG, "Excess power available: %.2f kW, Battery: %.1f%%", 
                  excess_power, measurements->soc_percent);
-        return ENERGY_STATE_EXCESS_AVAILABLE;
+        return ENERGY_STATE_EXCESS_AVAILABLE_NA_VOLJO_PRESEZEK_ENERGIJE;
     }
     
     return ENERGY_STATE_NORMAL;
@@ -184,7 +190,7 @@ static void execute_energy_control(energy_state_t state, const emma_measurements
     }
     
     switch (state) {
-        case ENERGY_STATE_EXCESS_AVAILABLE:
+        case ENERGY_STATE_EXCESS_AVAILABLE_NA_VOLJO_PRESEZEK_ENERGIJE:
             ESP_LOGI(TAG, "Enabling loads due to excess power");
             break;
         case ENERGY_STATE_BATTERY_LOW:
@@ -203,7 +209,7 @@ static void execute_energy_control(energy_state_t state, const emma_measurements
 static const char* get_energy_state_string(energy_state_t state) {
     switch (state) {
         case ENERGY_STATE_NORMAL: return "NORMALNO";
-        case ENERGY_STATE_EXCESS_AVAILABLE: return "PRESEZEK ENERGIJE";
+        case ENERGY_STATE_EXCESS_AVAILABLE_NA_VOLJO_PRESEZEK_ENERGIJE: return "PRESEZEK ENERGIJE";
         case ENERGY_STATE_BATTERY_LOW: return "NIZKA BATERIJA";
         case ENERGY_STATE_GRID_LIMITING: return "OMEJITEV OMREZJA";
         default: return "NEZNAN";
