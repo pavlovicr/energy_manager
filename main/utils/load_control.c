@@ -1,228 +1,388 @@
-#include "wifi_manager.h"
+#include "load_control.h"
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/event_groups.h"
 #include "esp_system.h"
-#include "esp_wifi.h"
-#include "esp_event.h"
 #include "esp_log.h"
-#include "nvs_flash.h"
-#include "esp_netif.h"
 #include "esp_timer.h"
+#include "driver/gpio.h"
 
-static const char* TAG = "WIFI_MANAGER";
+static const char* TAG = "LOAD_CONTROL";
 
 // Global variables
-static EventGroupHandle_t s_wifi_event_group;
-static wifi_info_t s_wifi_info;
-static int s_retry_num = 0;
+static load_device_t devices[LOAD_MAX_DEVICES];
+static load_control_status_t system_status;
+static uint8_t device_count = 0;
 
-#define WIFI_CONNECTED_BIT BIT0
-#define WIFI_FAIL_BIT      BIT1
+// Helper functions
+static load_device_t* find_device_by_id(uint8_t id);
+static void update_system_status(void);
 
-// Event handler
-static void event_handler(void* arg, esp_event_base_t event_base,
-                          int32_t event_id, void* event_data) {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-        s_wifi_info.status = WIFI_STATUS_CONNECTING;
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry_num < WIFI_MAXIMUM_RETRY) {
-            esp_wifi_connect();
-            s_retry_num++;
-            s_wifi_info.retry_count = s_retry_num;
-            ESP_LOGI(TAG, "Retry to connect to the AP");
-        } else {
-            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
-            s_wifi_info.status = WIFI_STATUS_FAILED;
-        }
-        s_wifi_info.disconnect_count++;
-        ESP_LOGI(TAG, "Connect to the AP fail");
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        ESP_LOGI(TAG, "Got ip:" IPSTR, IP2STR(&event->ip_info.ip));
-        s_retry_num = 0;
-        s_wifi_info.retry_count = 0;
-        s_wifi_info.status = WIFI_STATUS_CONNECTED;
-        s_wifi_info.ip_address = event->ip_info.ip.addr;
-        s_wifi_info.connect_time = esp_timer_get_time() / 1000000; // Convert to seconds
-        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
-    }
-}
-
-esp_err_t wifi_manager_init(void) {
-    s_wifi_event_group = xEventGroupCreate();
+esp_err_t load_control_init(void)
+{
+    ESP_LOGI(TAG, "Initializing Load Control System");
     
-    // Initialize wifi_info structure
-    memset(&s_wifi_info, 0, sizeof(wifi_info_t));
-    s_wifi_info.status = WIFI_STATUS_DISCONNECTED;
+    // Initialize system status
+    memset(&system_status, 0, sizeof(load_control_status_t));
+    system_status.system_enabled = true;
+    system_status.last_update_time = esp_timer_get_time() / 1000000;
     
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    esp_event_handler_instance_t instance_any_id;
-    esp_event_handler_instance_t instance_got_ip;
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        ESP_EVENT_ANY_ID,
-                                                        &event_handler,
-                                                        NULL,
-                                                        &instance_any_id));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
-                                                        IP_EVENT_STA_GOT_IP,
-                                                        &event_handler,
-                                                        NULL,
-                                                        &instance_got_ip));
-
-    ESP_LOGI(TAG, "WiFi manager initialized");
+    // Initialize devices array
+    memset(devices, 0, sizeof(devices));
+    device_count = 0;
+    
+    ESP_LOGI(TAG, "Load Control System initialized");
     return ESP_OK;
 }
 
-esp_err_t wifi_manager_connect(const char* ssid, const char* password) {
-    if (!ssid || !password) {
+esp_err_t load_control_add_device(uint8_t id, const char* name, uint8_t gpio_pin, 
+                                 load_priority_t priority, float rated_power_kw)
+{
+    if (device_count >= LOAD_MAX_DEVICES) {
+        ESP_LOGE(TAG, "Maximum devices limit reached");
+        return ESP_ERR_NO_MEM;
+    }
+    
+    if (find_device_by_id(id) != NULL) {
+        ESP_LOGE(TAG, "Device with ID %d already exists", id);
         return ESP_ERR_INVALID_ARG;
     }
-
-    // Store credentials
-    strncpy(s_wifi_info.ssid, ssid, sizeof(s_wifi_info.ssid) - 1);
-    strncpy(s_wifi_info.password, password, sizeof(s_wifi_info.password) - 1);
     
-    wifi_config_t wifi_config = {
-        .sta = {
-            .threshold.authmode = WIFI_AUTH_WPA2_PSK,
-        },
+    if (!name || strlen(name) == 0) {
+        ESP_LOGE(TAG, "Device name cannot be empty");
+        return ESP_ERR_INVALID_ARG;
+    }
+    
+    // Configure GPIO
+    gpio_config_t io_conf = {
+        .intr_type = GPIO_INTR_DISABLE,
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = (1ULL << gpio_pin),
+        .pull_down_en = 0,
+        .pull_up_en = 0,
     };
+    esp_err_t ret = gpio_config(&io_conf);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to configure GPIO %d", gpio_pin);
+        return ret;
+    }
     
-    strncpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid));
-    strncpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password));
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-    s_wifi_info.status = WIFI_STATUS_CONNECTING;
-    ESP_LOGI(TAG, "WiFi initialization finished. Connecting to %s", ssid);
-
-    // Wait for connection
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
-            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-            pdFALSE,
-            pdFALSE,
-            pdMS_TO_TICKS(WIFI_CONNECT_TIMEOUT_MS));
-
-    if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "Connected to ap SSID:%s", ssid);
-        return ESP_OK;
-    } else if (bits & WIFI_FAIL_BIT) {
-        ESP_LOGI(TAG, "Failed to connect to SSID:%s", ssid);
-        return ESP_FAIL;
-    } else {
-        ESP_LOGE(TAG, "UNEXPECTED EVENT");
-        return ESP_FAIL;
-    }
+    // Add device
+    load_device_t* device = &devices[device_count];
+    device->id = id;
+    strncpy(device->name, name, sizeof(device->name) - 1);
+    device->gpio_pin = gpio_pin;
+    device->priority = priority;
+    device->mode = LOAD_MODE_MANUAL;
+    device->rated_power_kw = rated_power_kw;
+    device->current_state = false;
+    device->desired_state = false;
+    device->on_time_seconds = 0;
+    device->last_toggle_time = 0;
+    device->enabled = true;
+    
+    // Set initial GPIO state
+    gpio_set_level(gpio_pin, 0);
+    
+    device_count++;
+    
+    ESP_LOGI(TAG, "Added device: ID=%d, Name=%s, GPIO=%d, Priority=%d, Power=%.2fkW", 
+             id, name, gpio_pin, priority, rated_power_kw);
+    
+    update_system_status();
+    return ESP_OK;
 }
 
-esp_err_t wifi_manager_disconnect(void) {
-    esp_err_t ret = esp_wifi_disconnect();
-    if (ret == ESP_OK) {
-        s_wifi_info.status = WIFI_STATUS_DISCONNECTED;
-        ESP_LOGI(TAG, "WiFi disconnected");
+esp_err_t load_control_remove_device(uint8_t id)
+{
+    for (int i = 0; i < device_count; i++) {
+        if (devices[i].id == id) {
+            // Turn off device before removing
+            if (devices[i].current_state) {
+                gpio_set_level(devices[i].gpio_pin, 0);
+            }
+            
+            // Shift remaining devices
+            for (int j = i; j < device_count - 1; j++) {
+                devices[j] = devices[j + 1];
+            }
+            
+            device_count--;
+            ESP_LOGI(TAG, "Removed device ID %d", id);
+            update_system_status();
+            return ESP_OK;
+        }
     }
-    return ret;
+    
+    ESP_LOGW(TAG, "Device with ID %d not found", id);
+    return ESP_ERR_NOT_FOUND;
 }
 
-esp_err_t wifi_manager_reconnect(void) {
-    if (strlen(s_wifi_info.ssid) == 0) {
-        ESP_LOGE(TAG, "No stored credentials for reconnection");
+esp_err_t load_control_set_device_state(uint8_t id, bool state)
+{
+    load_device_t* device = find_device_by_id(id);
+    if (!device) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    if (!device->enabled) {
+        ESP_LOGW(TAG, "Device %s is disabled", device->name);
         return ESP_ERR_INVALID_STATE;
     }
     
-    s_retry_num = 0;
-    return wifi_manager_connect(s_wifi_info.ssid, s_wifi_info.password);
+    if (!system_status.system_enabled) {
+        ESP_LOGW(TAG, "Load control system is disabled");
+        return ESP_ERR_INVALID_STATE;
+    }
+    
+    // Set GPIO state
+    gpio_set_level(device->gpio_pin, state ? 1 : 0);
+    
+    // Update device state
+    uint32_t current_time = esp_timer_get_time() / 1000000;
+    
+    if (device->current_state != state) {
+        device->current_state = state;
+        device->last_toggle_time = current_time;
+        system_status.total_switches++;
+        
+        ESP_LOGI(TAG, "Device %s turned %s", device->name, state ? "ON" : "OFF");
+    }
+    
+    device->desired_state = state;
+    update_system_status();
+    
+    return ESP_OK;
 }
 
-wifi_status_t wifi_manager_get_status(void) {
-    return s_wifi_info.status;
+esp_err_t load_control_toggle_device(uint8_t id)
+{
+    load_device_t* device = find_device_by_id(id);
+    if (!device) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    return load_control_set_device_state(id, !device->current_state);
 }
 
-wifi_info_t wifi_manager_get_info(void) {
-    // Update RSSI if connected
-    if (s_wifi_info.status == WIFI_STATUS_CONNECTED) {
-        wifi_ap_record_t ap_info;
-        if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
-            s_wifi_info.rssi = ap_info.rssi;
+esp_err_t load_control_set_device_mode(uint8_t id, load_control_mode_t mode)
+{
+    load_device_t* device = find_device_by_id(id);
+    if (!device) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    
+    device->mode = mode;
+    ESP_LOGI(TAG, "Device %s mode set to %d", device->name, mode);
+    
+    return ESP_OK;
+}
+
+void load_control_enable_flexible_loads(void)
+{
+    ESP_LOGI(TAG, "Enabling flexible loads due to excess power");
+    
+    for (int i = 0; i < device_count; i++) {
+        if (devices[i].priority == LOAD_PRIORITY_FLEXIBLE && 
+            devices[i].mode == LOAD_MODE_AUTO &&
+            devices[i].enabled && 
+            !devices[i].current_state) {
+            
+            load_control_set_device_state(devices[i].id, true);
         }
     }
-    return s_wifi_info;
 }
 
-bool wifi_manager_is_connected(void) {
-    return (s_wifi_info.status == WIFI_STATUS_CONNECTED);
-}
-
-esp_err_t wifi_manager_save_config(const char* ssid, const char* password) {
-    // Simple implementation - just store in memory
-    // In real implementation, you would save to NVS
-    strncpy(s_wifi_info.ssid, ssid, sizeof(s_wifi_info.ssid) - 1);
-    strncpy(s_wifi_info.password, password, sizeof(s_wifi_info.password) - 1);
-    ESP_LOGI(TAG, "WiFi config saved");
-    return ESP_OK;
-}
-
-esp_err_t wifi_manager_load_config(void) {
-    // Simple implementation - credentials already in memory
-    // In real implementation, you would load from NVS
-    ESP_LOGI(TAG, "WiFi config loaded");
-    return ESP_OK;
-}
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-//void wifi_manager_print_status(void) {
-//    wifi_info_t info = wifi_manager_get_info();
+void load_control_disable_non_essential_loads(void)
+{
+    ESP_LOGI(TAG, "Disabling non-essential loads due to low battery");
     
-//    printf("\n╔══════════════════════════════════════════════════════════════╗\n");
-//    printf("║                       WIFI STATUS                           ║\n");
-//    printf("╠══════════════════════════════════════════════════════════════╣\n");
-//    printf("║ SSID                 : %-32s ║\n", info.ssid);
-//    printf("║ Status               : %-32s ║\n", wifi_manager_get_status_string(info.status));
-//    printf("║ IP Address           : " IPSTR "                        ║\n", IP2STR(&info.ip_address));
-//    printf("║ RSSI                 : %d dBm                            ║\n", info.rssi);
-//    printf("║ Retry Count          : %u                                ║\n", (unsigned int)info.retry_count);
-//    printf("║ Disconnect Count     : %u                                ║\n", (unsigned int)info.disconnect_count);
-//    printf("║ Connect Time         : %u s                              ║\n", (unsigned int)info.connect_time);
-//    printf("╚══════════════════════════════════════════════════════════════╝\n\n");
-//}
+    for (int i = 0; i < device_count; i++) {
+        if ((devices[i].priority == LOAD_PRIORITY_NORMAL || 
+             devices[i].priority == LOAD_PRIORITY_FLEXIBLE ||
+             devices[i].priority == LOAD_PRIORITY_OPPORTUNISTIC) &&
+            devices[i].mode == LOAD_MODE_AUTO &&
+            devices[i].enabled && 
+            devices[i].current_state) {
+            
+            load_control_set_device_state(devices[i].id, false);
+        }
+    }
+}
 
-void wifi_manager_print_status(void) {
-    wifi_info_t info = wifi_manager_get_info();
+void load_control_enable_high_power_loads(void)
+{
+    ESP_LOGI(TAG, "Enabling high power loads to reduce grid feed-in");
     
-    // Pretvori uint32_t IP naslov v esp_ip4_addr_t strukturo za IP2STR makro
-    esp_ip4_addr_t ip_addr;
-    ip_addr.addr = info.ip_address;
+    for (int i = 0; i < device_count; i++) {
+        if (devices[i].priority == LOAD_PRIORITY_OPPORTUNISTIC && 
+            devices[i].mode == LOAD_MODE_AUTO &&
+            devices[i].enabled && 
+            !devices[i].current_state &&
+            devices[i].rated_power_kw > 1.0f) {
+            
+            load_control_set_device_state(devices[i].id, true);
+        }
+    }
+}
+
+void load_control_maintain_normal_state(void)
+{
+    ESP_LOGD(TAG, "Maintaining normal load state");
     
+    // Turn off opportunistic loads if not needed
+    for (int i = 0; i < device_count; i++) {
+        if (devices[i].priority == LOAD_PRIORITY_OPPORTUNISTIC && 
+            devices[i].mode == LOAD_MODE_AUTO &&
+            devices[i].current_state) {
+            
+            load_control_set_device_state(devices[i].id, false);
+        }
+    }
+}
+
+void load_control_enable_system(bool enable)
+{
+    system_status.system_enabled = enable;
+    
+    if (!enable) {
+        // Turn off all non-essential devices
+        ESP_LOGI(TAG, "System disabled - turning off non-essential loads");
+        for (int i = 0; i < device_count; i++) {
+            if (devices[i].priority != LOAD_PRIORITY_ESSENTIAL && 
+                devices[i].current_state) {
+                load_control_set_device_state(devices[i].id, false);
+            }
+        }
+    }
+    
+    ESP_LOGI(TAG, "Load control system %s", enable ? "enabled" : "disabled");
+}
+
+void load_control_emergency_shutdown(void)
+{
+    ESP_LOGW(TAG, "EMERGENCY SHUTDOWN - turning off all loads");
+    
+    for (int i = 0; i < device_count; i++) {
+        if (devices[i].current_state) {
+            gpio_set_level(devices[i].gpio_pin, 0);
+            devices[i].current_state = false;
+            devices[i].last_toggle_time = esp_timer_get_time() / 1000000;
+        }
+    }
+    
+    system_status.system_enabled = false;
+    update_system_status();
+}
+
+void load_control_update(void)
+{
+    uint32_t current_time = esp_timer_get_time() / 1000000;
+    
+    // Update on-time for active devices
+    for (int i = 0; i < device_count; i++) {
+        if (devices[i].current_state) {
+            devices[i].on_time_seconds = current_time - devices[i].last_toggle_time;
+        }
+    }
+    
+    update_system_status();
+}
+
+load_control_status_t load_control_get_status(void)
+{
+    update_system_status();
+    return system_status;
+}
+
+load_device_t* load_control_get_device(uint8_t id)
+{
+    return find_device_by_id(id);
+}
+
+void load_control_print_status(void)
+{
     printf("\n╔══════════════════════════════════════════════════════════════╗\n");
-    printf("║                       WIFI STATUS                           ║\n");
+    printf("║                      LOAD CONTROL STATUS                    ║\n");
     printf("╠══════════════════════════════════════════════════════════════╣\n");
-    printf("║ SSID                 : %-32s ║\n", info.ssid);
-    printf("║ Status               : %-32s ║\n", wifi_manager_get_status_string(info.status));
-    printf("║ IP Address           : " IPSTR "                        ║\n", IP2STR(&ip_addr));
-    printf("║ RSSI                 : %d dBm                            ║\n", info.rssi);
-    printf("║ Retry Count          : %u                                ║\n", (unsigned int)info.retry_count);
-    printf("║ Disconnect Count     : %u                                ║\n", (unsigned int)info.disconnect_count);
-    printf("║ Connect Time         : %u s                              ║\n", (unsigned int)info.connect_time);
+    printf("║ System Enabled          : %-32s ║\n", 
+           system_status.system_enabled ? "YES" : "NO");
+    printf("║ Active Loads            : %-8d                        ║\n", 
+           system_status.active_loads);
+    printf("║ Total Controlled Power  : %8.2f kW                     ║\n", 
+           system_status.total_controlled_power);
+    printf("║ Total Switches          : %-8lu                        ║\n", 
+           (unsigned long)system_status.total_switches);
+    printf("║ Device Count            : %-8d                        ║\n", 
+           device_count);
     printf("╚══════════════════════════════════════════════════════════════╝\n\n");
 }
 
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-const char* wifi_manager_get_status_string(wifi_status_t status) {
-    switch (status) {
-        case WIFI_STATUS_DISCONNECTED: return "DISCONNECTED";
-        case WIFI_STATUS_CONNECTING: return "CONNECTING";
-        case WIFI_STATUS_CONNECTED: return "CONNECTED";
-        case WIFI_STATUS_FAILED: return "FAILED";
-        default: return "UNKNOWN";
+void load_control_print_devices(void)
+{
+    printf("\n╔══════════════════════════════════════════════════════════════╗\n");
+    printf("║                        LOAD DEVICES                         ║\n");
+    printf("╠══════════════════════════════════════════════════════════════╣\n");
+    
+    if (device_count == 0) {
+        printf("║                     No devices configured                   ║\n");
+    } else {
+        for (int i = 0; i < device_count; i++) {
+            printf("║ ID: %2d | %-15s | GPIO: %2d | %s | %4.1fkW ║\n",
+                   devices[i].id,
+                   devices[i].name,
+                   devices[i].gpio_pin,
+                   devices[i].current_state ? "ON " : "OFF",
+                   devices[i].rated_power_kw);
+        }
     }
+    
+    printf("╚══════════════════════════════════════════════════════════════╝\n\n");
+}
+
+uint32_t load_control_get_total_switches(void)
+{
+    return system_status.total_switches;
+}
+
+float load_control_get_total_controlled_power(void)
+{
+    return system_status.total_controlled_power;
+}
+
+void load_control_reset_statistics(void)
+{
+    system_status.total_switches = 0;
+    
+    for (int i = 0; i < device_count; i++) {
+        devices[i].on_time_seconds = 0;
+    }
+    
+    ESP_LOGI(TAG, "Load control statistics reset");
+}
+
+// Helper functions
+static load_device_t* find_device_by_id(uint8_t id)
+{
+    for (int i = 0; i < device_count; i++) {
+        if (devices[i].id == id) {
+            return &devices[i];
+        }
+    }
+    return NULL;
+}
+
+static void update_system_status(void)
+{
+    system_status.active_loads = 0;
+    system_status.total_controlled_power = 0.0f;
+    
+    for (int i = 0; i < device_count; i++) {
+        if (devices[i].current_state) {
+            system_status.active_loads++;
+            system_status.total_controlled_power += devices[i].rated_power_kw;
+        }
+    }
+    
+    system_status.last_update_time = esp_timer_get_time() / 1000000;
 }

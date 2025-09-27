@@ -32,8 +32,8 @@
 // Configuration
 #define EMMA_IP_ADDRESS "192.168.64.101"
 #define MEASUREMENT_INTERVAL_MS 15000
-#define CONTROL_INTERVAL_MS 5000
-#define DISPLAY_UPDATE_INTERVAL_MS 3000  // Display se posodobi 
+#define CONTROL_INTERVAL_MS 5000 // prej 5000
+#define DISPLAY_UPDATE_INTERVAL_MS 2000  // Display se posodobi prej 2000
 
 // Global variables
 static emma_client_t g_emma; //struct emma_modbus.h
