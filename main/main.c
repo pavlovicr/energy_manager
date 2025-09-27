@@ -20,6 +20,7 @@
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
+#include "esp_task_wdt.h."
 
 // Custom moduli
 #include "emma_modbus.h"
@@ -216,12 +217,15 @@ static const char* get_energy_state_string(energy_state_t state) {
     }
 }
 
+
+
+
 // Task za branje EMMA meritev
 static void measurement_task(void *pvParameters) {
     ESP_LOGI(TAG, "Starting measurement task");
     
     while (1) {
-        esp_err_t ret = emma_read_all_measurements(&g_emma);
+        esp_err_t ret = emma_read_all_measurements(&g_emma);                        
         
         if (ret == ESP_OK) {
             ESP_LOGI(TAG, "EMMA measurements updated successfully");
@@ -336,9 +340,10 @@ void system_print_status(void) {
 
 // Main application entry point
 void app_main(void) {
+
     ESP_LOGI(TAG, "Starting ESP32 Energy Management System with Box3 Display");
     ESP_LOGI(TAG, "Target EMMA: %s", EMMA_IP_ADDRESS);
-   
+
     // Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -370,7 +375,7 @@ void app_main(void) {
     
     // Connect to EMMA
     ret = emma_connect(&g_emma);
-    if (ret == ESP_OK) {
+    if (ret == ESP_OK) { 
         ESP_LOGI(TAG, "Connected to EMMA successfully");
         display_update_connection_status(true, true, 100.0f);
         display_update_system_status("POVEZANO");
@@ -384,6 +389,20 @@ void app_main(void) {
     energy_config_print();
     system_print_status();
     
+    
+    //////////////////////////////////////dodan WOTCHDOG /////////////////////////////////
+
+    // V app_main(), pred ustvarjanjem task-ov:
+    esp_task_wdt_config_t wdt_config = {
+        .timeout_ms = 10000,  // PO DEFAULTU JE 5 SEKUND. S to funkcijo izberemo čqas po želji.
+        .idle_core_mask = 0,
+        .trigger_panic = false,
+    };
+    esp_err_t err = esp_task_wdt_init(&wdt_config);
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////    
+    
+    
     // Create measurement task
     xTaskCreate(measurement_task, "measurement_task", 4096, NULL, 5, &measurement_task_handle);
     if (measurement_task_handle == NULL) {
@@ -391,7 +410,7 @@ void app_main(void) {
         display_show_error("TASK CREATE FAILED");
         return;
     }
-    
+
     // Create control task
     xTaskCreate(control_task, "control_task", 4096, NULL, 4, &control_task_handle);
     if (control_task_handle == NULL) {
@@ -399,7 +418,7 @@ void app_main(void) {
         display_show_error("CONTROL TASK FAILED");
         return;
     }
-    
+
     // Create display task
     xTaskCreate(display_task, "display_task", 4096, NULL, 3, &display_task_handle);
     if (display_task_handle == NULL) {
