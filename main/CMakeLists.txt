@@ -1,21 +1,37 @@
-# main/CMakeLists.txt - Energy Manager s Box3 displayom
-
-# main/CMakeLists.txt - Energy Manager s Box3 displayom
+# main/CMakeLists.txt - Modularna Energy Manager konfiguracija
 
 idf_component_register(
     SRCS 
+        # Glavna aplikacija
         "main.c"
-        "modbus/modbus_tcp.c"      
-        "modbus/emma_modbus.c"     
-        "utils/wifi_manager.c"     
-        "utils/load_control.c"     
-        "display/display_manager.c"    # Dodano za Box3 display
+        
+        # Core moduli
+        "core/energy_manager.c"
+        "core/system_config.c"
+        "core/app_tasks.c"
+        
+        # Communication moduli
+        "communication/modbus/emma_modbus.c"
+        "communication/modbus/modbus_tcp.c"
+        "communication/wifi/wifi_manager.c"
+        
+        # Control moduli
+        "control/load_control.c"
+        
+        # UI moduli
+        "ui/display_manager.c"
+        
     INCLUDE_DIRS 
-        "."
-        "modbus"                   
-        "utils"                    
-        "display"                  # Dodano za Box3 display
+        "."                              # Glavna main mapa
+        "core"                           # Core komponente
+        "communication"                  # Komunikacijske komponente  
+        "communication/modbus"           # Modbus specifično
+        "communication/wifi"             # WiFi specifično
+        "control"                        # Kontrolne komponente
+        "ui"                            # UI komponente
+        
     REQUIRES 
+        # ESP-IDF core komponente
         nvs_flash
         esp_wifi
         esp_netif
@@ -27,6 +43,13 @@ idf_component_register(
         driver
         esp_system
         esp_common
-        espressif__esp-box-3       # Pravilno ime iz managed_components
-        espressif__esp_lvgl_port   # LVGL port
+        
+        # Box3 BSP komponente (opcijsko)
+        espressif__esp-box-3
+        espressif__esp_lvgl_port
+        
+    OPTIONAL_REQUIRES
+        # Opcijske komponente ki ne prekinejo build-a če manjkajo
+        esp_lcd
+        button
 )
