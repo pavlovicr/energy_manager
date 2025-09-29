@@ -43,13 +43,16 @@ idf_component_register(
         driver
         esp_system
         esp_common
+        espressif__esp-modbus
+        mb_example_common
         
         # Box3 BSP komponente (opcijsko)
         espressif__esp-box-3
         espressif__esp_lvgl_port
         
-    OPTIONAL_REQUIRES
+    #OPTIONAL_REQUIRES
         # Opcijske komponente ki ne prekinejo build-a če manjkajo
-        esp_lcd
-        button
+    #    esp_lcd
+    #    button
+       
 )
