@@ -40,16 +40,19 @@ void app_main(void)
         .idle_core_mask = 0,
         .trigger_panic = false,
     };
-    ESP_ERROR_CHECK(esp_task_wdt_init(&wdt_config));
-    
+    //////////////////////////////////////////////////////////////////////////////////////////
+    //ESP_ERROR_CHECK(esp_task_wdt_init(&wdt_config));
+    ////////////////////////////////////////////////////////////////////////////////////////////
     // 3. Sistem konfiguracija
     ESP_ERROR_CHECK(system_config_init());
+    
     
     // 4. Core energetski manager
     ESP_ERROR_CHECK(energy_manager_init());
     
     // 5. Komunikacijski moduli
     ESP_ERROR_CHECK(wifi_manager_init());
+    wifi_manager_connect("ONEfourTWO", "markoskacepozelenitrati");
     
     // 6. UI komponenta
     esp_err_t display_ret = display_manager_init();
@@ -64,7 +67,7 @@ void app_main(void)
     
     // Main loop - minimalen monitoring
     while (1) {
-        esp_task_wdt_reset();
+       // esp_task_wdt_reset();
         system_heartbeat();
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
