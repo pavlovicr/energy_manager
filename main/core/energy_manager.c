@@ -11,14 +11,24 @@ static const char* TAG = "ENERGY_MGR";
 static energy_manager_t g_energy_mgr;
 static emma_client_t g_emma_client;
 static bool g_initialized = false;
+static energy_data_t energy_data = {0};
 
 // Helper funkcije
 static energy_state_t analyze_energy_situation(const emma_measurements_t *measurements);
 static void execute_energy_control(energy_state_t state);
 static const char* get_state_string(energy_state_t state);
 
+energy_state_t energy_manager_get_current_state(void) {
+    return g_energy_manager.current_state;  // ali kako se imenuje tvoja globalna spremenljivka
+}
+
 esp_err_t energy_manager_init(void)
 {
+    esp_err_t energy_manager_init(void) {
+    // Initialize energy data
+    energy_data.state = ENERGY_STATE_INITIALIZING;
+    return ESP_OK; 
+    }
     ESP_LOGI(TAG, "Initializing Energy Manager Core");
     
     memset(&g_energy_mgr, 0, sizeof(energy_manager_t));

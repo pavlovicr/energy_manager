@@ -55,7 +55,7 @@ void app_main(void)
     wifi_manager_connect("ONEfourTWO", "markoskacepozelenitrati");
     
     // 6. UI komponenta
-    esp_err_t display_ret = display_manager_init();
+    esp_err_t display_ret = display_init();
     if (display_ret != ESP_OK) {
         ESP_LOGW(TAG, "Display init failed, continuing without UI");
     }

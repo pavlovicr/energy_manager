@@ -22,6 +22,7 @@ idf_component_register(
         "ui/display_manager.c"
         
     INCLUDE_DIRS 
+        #"include"
         "."                              # Glavna main mapa
         "core"                           # Core komponente
         "communication"                  # Komunikacijske komponente  
@@ -47,6 +48,9 @@ idf_component_register(
         mb_example_common
         
         # Box3 BSP komponente (opcijsko)
+        esp_http_client
+        json
+        #mbcontroller
         espressif__esp-box-3
         espressif__esp_lvgl_port
         

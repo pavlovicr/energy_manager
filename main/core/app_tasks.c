@@ -163,33 +163,39 @@ static void energy_analysis_task(void *param)
     }
 }
 
-static void display_update_task(void *param)
-{
-    ESP_LOGI(TAG, "Display update task started");
+static void display_update_task(void *pvParameters) {
+    TickType_t last_wake = xTaskGetTickCount();
     
     while (1) {
-    //    esp_task_wdt_reset();
+        // Pridobi najnovejše meritve
+        const emma_measurements_t* measurements = energy_manager_get_latest_data();
         
-        // Preveri če imamo veljavne EMMA podatke
-        const emma_measurements_t* data = energy_manager_get_latest_data();
-        if (data != NULL) {
-            // Posodobi display z EMMA podatki
-            display_manager_update_emma_measurements(data);
+        if (measurements) {
+            // Pretvori emma_measurements_t v energy_data_t
+            energy_data_t display_data = {
+                .voltage_l1 = measurements->voltage_l1,
+                .current_l1 = measurements->current_l1,
+                .power_active = measurements->power_active,
+                .energy_total = measurements->energy_total,
+                .state = energy_manager_get_current_state(),  // Dodaj to funkcijo
+                .timestamp = 0
+            };
             
-            // Posodobi status povezave
-            display_manager_update_connection_status(
-                energy_manager_is_emma_connected(),
-                wifi_manager_is_connected(),
-                energy_manager_get_success_rate()
-            );
-            
-            // Posodobi sistem status
-            display_manager_update_system_status(energy_manager_get_status_string());
+            // Posodobi display
+            display_update(&display_data);
         }
         
-        vTaskDelay(pdMS_TO_TICKS(DISPLAY_UPDATE_INTERVAL));
+        // Posodobi WiFi status
+        display_update_wifi_status(wifi_manager_is_connected(), "ONEfourTWO");
+        
+        // Posodobi EMMA status
+        display_update_emma_status(energy_manager_is_emma_connected());
+        
+        // Čakaj 1 sekundo
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(1000));
     }
 }
+
 
 static void wifi_monitor_task(void *param)
 {
