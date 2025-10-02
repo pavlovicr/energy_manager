@@ -19,7 +19,7 @@ static void execute_energy_control(energy_state_t state);
 static const char* get_state_string(energy_state_t state);
 
 energy_state_t energy_manager_get_current_state(void) {
-    return g_energy_manager.current_state;  // ali kako se imenuje tvoja globalna spremenljivka
+    return g_energy_mgr.current_state;  // ali kako se imenuje tvoja globalna spremenljivka
 }
 
 esp_err_t energy_manager_init(void)

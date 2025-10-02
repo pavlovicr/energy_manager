@@ -14,7 +14,6 @@ static const char *TAG = "DISPLAY";
 static lv_obj_t *label_voltage = NULL;
 static lv_obj_t *label_current = NULL;
 static lv_obj_t *label_power = NULL;
-static lv_obj_t *label_energy = NULL;
 static lv_obj_t *label_state = NULL;
 static lv_obj_t *label_wifi = NULL;
 static lv_obj_t *label_emma = NULL;
@@ -48,15 +47,10 @@ static void create_ui(void) {
     lv_label_set_text(label_power, "P: ---");
     lv_obj_align(label_power, LV_ALIGN_TOP_LEFT, 10, 70);
     
-    // Energy
-    label_energy = lv_label_create(screen);
-    lv_label_set_text(label_energy, "E: ---");
-    lv_obj_align(label_energy, LV_ALIGN_TOP_LEFT, 10, 90);
-    
     // State
     label_state = lv_label_create(screen);
     lv_label_set_text(label_state, "State: INIT");
-    lv_obj_align(label_state, LV_ALIGN_TOP_LEFT, 10, 110);
+    lv_obj_align(label_state, LV_ALIGN_TOP_LEFT, 10, 90);
     
     // WiFi status
     label_wifi = lv_label_create(screen);
@@ -72,9 +66,9 @@ static void create_ui(void) {
 }
 
 /**
- * Initialize display using BSP
+ * Initialize display using BSP - PREIMENOVANO
  */
-esp_err_t display_init(void) {
+esp_err_t display_manager_init(void) {
     ESP_LOGI(TAG, "Initializing BOX-3 display via BSP");
     
     // Initialize display via BSP
@@ -92,68 +86,61 @@ esp_err_t display_init(void) {
 }
 
 /**
- * Update display with energy data
+ * Update EMMA measurements on display - NOVA FUNKCIJA
  */
-void display_update(const energy_data_t *data) {
-    if (!display_initialized || !data) {
-        return;
+esp_err_t display_manager_update_emma_measurements(const emma_measurements_t *measurements) {
+    if (!display_initialized || !measurements) {
+        return ESP_ERR_INVALID_STATE;
     }
     
     bsp_display_lock(0);
     
-    lv_label_set_text_fmt(label_voltage, "V: %.1f V", data->voltage_l1);
-    lv_label_set_text_fmt(label_current, "I: %.2f A", data->current_l1);
-    lv_label_set_text_fmt(label_power, "P: %.0f W", data->power_active);
-    lv_label_set_text_fmt(label_energy, "E: %.1f Wh", data->energy_total);
-    
-    const char *state_str = "UNKNOWN";
-    switch (data->state) {
-        case ENERGY_STATE_INITIALIZING: state_str = "INIT"; break;
-        case ENERGY_STATE_NORMAL: state_str = "NORMAL"; break;
-        default: state_str = "ERROR"; break;
-    }
-    lv_label_set_text_fmt(label_state, "State: %s", state_str);
+    lv_label_set_text_fmt(label_voltage, "V: %.1f V", measurements->phase_a_voltage);
+    lv_label_set_text_fmt(label_current, "I: %.2f A", measurements->phase_a_current);
+    lv_label_set_text_fmt(label_power, "P: %.0f W", measurements->active_power);
     
     bsp_display_unlock();
+    
+    return ESP_OK;
 }
 
 /**
- * Update WiFi status
+ * Update connection status - NOVA FUNKCIJA
  */
-void display_update_wifi_status(bool connected, const char *ssid) {
-    if (!display_initialized) return;
+esp_err_t display_manager_update_connection_status(bool emma_connected, bool wifi_connected, float success_rate) {
+    if (!display_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
     
     bsp_display_lock(0);
-    if (connected && ssid) {
-        lv_label_set_text_fmt(label_wifi, "WiFi: %.10s", ssid);
-    } else {
-        lv_label_set_text(label_wifi, "WiFi: --");
-    }
+    
+    lv_label_set_text(label_wifi, wifi_connected ? "WiFi: OK" : "WiFi: --");
+    lv_label_set_text_fmt(label_emma, "EMMA: %s (%.0f%%)", 
+                         emma_connected ? "OK" : "--", success_rate);
+    
     bsp_display_unlock();
+    
+    return ESP_OK;
 }
 
 /**
- * Update EMMA status
+ * Update system status - NOVA FUNKCIJA
  */
-void display_update_emma_status(bool connected) {
-    if (!display_initialized) return;
+esp_err_t display_manager_update_system_status(const char* status_text) {
+    if (!display_initialized || !status_text) {
+        return ESP_ERR_INVALID_STATE;
+    }
     
     bsp_display_lock(0);
-    lv_label_set_text(label_emma, connected ? "EMMA: OK" : "EMMA: --");
+    lv_label_set_text_fmt(label_state, "State: %s", status_text);
     bsp_display_unlock();
-}
-
-/**
- * Show error message
- */
-void display_show_error(const char *message) {
-    if (!display_initialized) return;
-    ESP_LOGW(TAG, "Error: %s", message);
+    
+    return ESP_OK;
 }
 
 /**
  * Check if display is available
  */
-bool display_is_available(void) {
+bool display_manager_is_available(void) {
     return display_initialized;
 }

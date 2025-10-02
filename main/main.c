@@ -27,6 +27,8 @@
 static esp_err_t nvs_flash_init_or_erase(void);
 static void system_heartbeat(void);
 
+esp_err_t display_manager_init(void);
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "ESP32 Energy Manager Starting...");
@@ -55,7 +57,7 @@ void app_main(void)
     wifi_manager_connect("ONEfourTWO", "markoskacepozelenitrati");
     
     // 6. UI komponenta
-    esp_err_t display_ret = display_init();
+    esp_err_t display_ret = display_manager_init();
     if (display_ret != ESP_OK) {
         ESP_LOGW(TAG, "Display init failed, continuing without UI");
     }

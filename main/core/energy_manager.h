@@ -34,6 +34,7 @@ typedef struct {
     uint32_t timestamp;
 } energy_data_t;
 
+
 typedef struct {
     float excess_power_threshold_kw;
     float battery_high_soc_threshold;

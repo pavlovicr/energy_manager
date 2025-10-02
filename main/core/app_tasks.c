@@ -29,7 +29,7 @@ static TaskHandle_t wifi_monitor_handle = NULL;
 // Intervali (ms)
 #define EMMA_UPDATE_INTERVAL        15000   // 15 sekund
 #define ANALYSIS_INTERVAL           5000    // 5 sekund
-#define DISPLAY_UPDATE_INTERVAL     2000    // 2 sekundi
+#define DISPLAY_UPDATE_INTERVAL     1000    // 1 sekunda
 #define WIFI_MONITOR_INTERVAL       10000   // 10 sekund
 
 // Task funkcije
@@ -50,6 +50,7 @@ esp_err_t app_tasks_start(void)
         ESP_LOGE(TAG, "Failed to create EMMA communication task");
         return ESP_FAIL;
     }
+    ESP_LOGI(TAG, "EMMA communication task started");
     
     // Energetska analiza task
     ret = xTaskCreate(energy_analysis_task, "energy_analysis", 
@@ -59,6 +60,7 @@ esp_err_t app_tasks_start(void)
         ESP_LOGE(TAG, "Failed to create energy analysis task");
         return ESP_FAIL;
     }
+    ESP_LOGI(TAG, "Energy analysis task started");
     
     // Display posodabljanje task
     ret = xTaskCreate(display_update_task, "display_ui", 
@@ -66,6 +68,8 @@ esp_err_t app_tasks_start(void)
                      DISPLAY_TASK_PRIORITY, &display_task_handle);
     if (ret != pdPASS) {
         ESP_LOGW(TAG, "Failed to create display task - continuing without UI");
+    } else {
+        ESP_LOGI(TAG, "Display update task started");
     }
     
     // WiFi monitoring task
@@ -74,6 +78,8 @@ esp_err_t app_tasks_start(void)
                      WIFI_MONITOR_PRIORITY, &wifi_monitor_handle);
     if (ret != pdPASS) {
         ESP_LOGW(TAG, "Failed to create WiFi monitor task");
+    } else {
+        ESP_LOGI(TAG, "WiFi monitor task started");
     }
     
     ESP_LOGI(TAG, "Application tasks started successfully");
@@ -126,14 +132,14 @@ task_status_t app_tasks_get_status(void)
 // Task implementacije
 static void emma_communication_task(void *param)
 {
-    ESP_LOGI(TAG, "EMMA communication task started");
+    ESP_LOGI(TAG, "EMMA communication task running");
     
     // Poskusi povezavo z EMMA
     energy_manager_connect_emma();
     
+    TickType_t last_wake = xTaskGetTickCount();
+    
     while (1) {
-     //   esp_task_wdt_reset();
-        
         // Posodobi EMMA meritve
         esp_err_t ret = energy_manager_update_measurements();
         
@@ -143,70 +149,74 @@ static void emma_communication_task(void *param)
             ESP_LOGW(TAG, "Failed to update EMMA measurements");
         }
         
-        vTaskDelay(pdMS_TO_TICKS(EMMA_UPDATE_INTERVAL));
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(EMMA_UPDATE_INTERVAL));
     }
 }
 
 static void energy_analysis_task(void *param)
 {
-    ESP_LOGI(TAG, "Energy analysis task started");
+    ESP_LOGI(TAG, "Energy analysis task running");
+    
+    TickType_t last_wake = xTaskGetTickCount();
     
     while (1) {
-    //    esp_task_wdt_reset();
-        
         // Analiziraj energetsko situacijo in izvedi kontrolo
         energy_state_t state = energy_manager_analyze_and_control();
         
         ESP_LOGD(TAG, "Energy state: %s", energy_manager_get_status_string());
         
-        vTaskDelay(pdMS_TO_TICKS(ANALYSIS_INTERVAL));
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(ANALYSIS_INTERVAL));
     }
 }
 
-static void display_update_task(void *pvParameters) {
+static void display_update_task(void *param)
+{
+    ESP_LOGI(TAG, "Display update task running");
+    
     TickType_t last_wake = xTaskGetTickCount();
     
     while (1) {
-        // Pridobi najnovejše meritve
+        // Pridobi najnovejše meritve - POPRAVLJENO IME FUNKCIJE
         const emma_measurements_t* measurements = energy_manager_get_latest_data();
+
+        ESP_LOGI(TAG, "Display task: measurements=%p", measurements);  // DODAJ
         
         if (measurements) {
-            // Pretvori emma_measurements_t v energy_data_t
-            energy_data_t display_data = {
-                .voltage_l1 = measurements->voltage_l1,
-                .current_l1 = measurements->current_l1,
-                .power_active = measurements->power_active,
-                .energy_total = measurements->energy_total,
-                .state = energy_manager_get_current_state(),  // Dodaj to funkcijo
-                .timestamp = 0
-            };
+            ESP_LOGI(TAG, "Updating display with voltage=%.1f", measurements->phase_a_voltage);  // DODAJ
+            // Posodobi meritve na zaslonu
+            display_manager_update_emma_measurements(measurements);
             
-            // Posodobi display
-            display_update(&display_data);
-        }
+            // Posodobi statuse povezav
+            bool emma_connected = energy_manager_is_emma_connected();
+            bool wifi_connected = wifi_manager_is_connected();
+            float success_rate = energy_manager_get_success_rate();
+            
+            ESP_LOGI(TAG, "Updating status: emma=%d, wifi=%d, rate=%.0f", emma_connected, wifi_connected, success_rate);  // DODAJ
+            
+            display_manager_update_connection_status(emma_connected, wifi_connected, success_rate);
+            
+            // Posodobi sistemski status
+            energy_state_t state = energy_manager_get_current_state();
+            const char *state_str = (state == ENERGY_STATE_NORMAL) ? "NORMAL" : 
+                                   (state == ENERGY_STATE_INITIALIZING) ? "INIT" : "ERROR";
+            display_manager_update_system_status(state_str);
         
-        // Posodobi WiFi status
-        display_update_wifi_status(wifi_manager_is_connected(), "ONEfourTWO");
+        } else {
+            ESP_LOGW(TAG, "No measurements available ");
+        }   
         
-        // Posodobi EMMA status
-        display_update_emma_status(energy_manager_is_emma_connected());
-        
-        // Čakaj 1 sekundo
-        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(1000));
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(DISPLAY_UPDATE_INTERVAL));
     }
 }
 
-
 static void wifi_monitor_task(void *param)
 {
-    ESP_LOGI(TAG, "WiFi monitor task started");
+    ESP_LOGI(TAG, "WiFi monitor task running");
     
-    // Poskusi povezavo z WiFi
-    esp_err_t wifi_manager_connect(const char* ssid, const char* password);
+    TickType_t last_wake = xTaskGetTickCount();
+    int wifi_counter = 0;
     
     while (1) {
-    //    esp_task_wdt_reset();
-        
         // Preveri WiFi status
         if (!wifi_manager_is_connected()) {
             ESP_LOGW(TAG, "WiFi disconnected, attempting reconnect");
@@ -214,13 +224,12 @@ static void wifi_monitor_task(void *param)
         }
         
         // Izpiši WiFi status vsakih 60 sekund
-        static int wifi_counter = 0;
         if (++wifi_counter % 6 == 0) {
             wifi_info_t info = wifi_manager_get_info();
             ESP_LOGI(TAG, "WiFi status: %s, RSSI: %d dBm", 
                      wifi_manager_get_status_string(info.status), info.rssi);
         }
         
-        vTaskDelay(pdMS_TO_TICKS(WIFI_MONITOR_INTERVAL));
+        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(WIFI_MONITOR_INTERVAL));
     }
 }
